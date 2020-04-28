@@ -6,6 +6,9 @@ const mongoose = require("mongoose");
 const session = require("express-session");
 const passport = require("passport");
 const passportLocalMongoose = require("passport-local-mongoose");
+const GoogleStrategy = require('passport-google-oauth20').Strategy;
+const findOrCreate = require('mongoose-findorcreate')
+const FacebookStrategy = require('passport-facebook').Strategy;
 
 const app = express();
 
@@ -28,10 +31,12 @@ mongoose.set("useCreateIndex", true);
 const userSchema = new mongoose.Schema({
     email: String,
     password: String,
-
+    googleId: String,
+    facebookId: String
 })
 
-mongoose.plugin(passportLocalMongoose);
+userSchema.plugin(passportLocalMongoose);
+userSchema.plugin(findOrCreate);
 
 // userSchema.plugin(encrypt, { secret: process.env.SECRET , encryptedFields: ["password"]}) // uses secret as an encryptor by using the mongoose-encryption as a plugin to the desired schema, and selecting only one field
 
@@ -39,12 +44,71 @@ const User = new mongoose.model("User", userSchema)
 
 passport.use(User.createStrategy());
  
-passport.serializeUser(User.serializeUser());
-passport.deserializeUser(User.deserializeUser());
+passport.serializeUser(function(user, done) {
+    done(null, user.id);
+  });
+  
+  passport.deserializeUser(function(id, done) {
+    User.findById(id, function(err, user) {
+      done(err, user);
+    });
+  });
+
+passport.use(new GoogleStrategy({
+    clientID: process.env.GOOGLE_CLIENT_ID, //pega id do google dev e esconte no .env
+    clientSecret: process.env.GOOGLE_CLIENT_SECRET, //pega id do google dev e esconte no .env
+    callbackURL: "http://localhost:3000/auth/google/secrets" //pega url do google dev.
+  },
+  function(accessToken, refreshToken, profile, cb) {
+      console.log(profile);
+    User.findOrCreate({ googleId: profile.id, email: profile.displayName }, function (err, user) {
+      return cb(err, user);
+    });
+  }
+));
+
+passport.use(new FacebookStrategy({
+    clientID: process.env.FACEBOOK_APP_ID,
+    clientSecret: process.env.FACEBOOK_APP_SECRET,
+    callbackURL: "http://localhost:3000/auth/facebook/callback"
+  },
+  function(accessToken, refreshToken, profile, cb) {
+      console.log(profile);
+    User.findOrCreate({ facebookId: profile.id, email: profile.displayName }, function (err, user) {
+      return cb(err, user);
+    });
+  }
+));
+
+
+
 
 app.get("/", (req,res)=>{
     res.render("home")
 })
+
+app.get("/auth/google",
+  passport.authenticate('google', { scope: ["profile"] })); //primeiro passo pra autenticar pelo google
+
+app.get("/auth/google/secrets", 
+  passport.authenticate('google', { failureRedirect: "/login" }), // autentica localmente , se nao deu vai pro login
+  function(req, res) {
+    // Successful authentication, redirect to secrets.
+    res.redirect('/secrets');
+  });
+
+
+
+app.get('/auth/facebook',
+  passport.authenticate('facebook'));
+
+app.get('/auth/facebook/callback',
+  passport.authenticate('facebook', { failureRedirect: '/login' }),
+  function(req, res) {
+    // Successful authentication, redirect home.
+    res.redirect('/secrets');
+  });
+
 
 app.get("/login", (req,res)=>{
     res.render("login")
@@ -101,6 +165,6 @@ app.post("/login", (req, res) => {
 
 })
 
-app.listen(1337,()=>{
+app.listen(3000,()=>{
     console.log("Server started sucessfully on port 1337");
 })
